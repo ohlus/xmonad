@@ -25,7 +25,7 @@ module XMonad.Core (
     StateExtension(..), ExtensionClass(..),
     runX, catchX, userCode, userCodeDef, io, catchIO, installSignalHandlers, uninstallSignalHandlers,
     withDisplay, withWindowSet, isRoot, runOnWorkspaces,
-    getAtom, spawn, spawnPID, xfork, getXMonadDir, recompile, trace, whenJust, whenX,
+    getAtom, spawn, spawnPID, xfork, getXMonadDir, getXMonadBinDir, recompile, trace, whenJust, whenX,
     atom_WM_STATE, atom_WM_PROTOCOLS, atom_WM_DELETE_WINDOW, atom_WM_TAKE_FOCUS, ManageHook, Query(..), runQuery
   ) where
 
@@ -435,69 +435,49 @@ runOnWorkspaces job = do
 getXMonadDir :: MonadIO m => m String
 getXMonadDir = io $ getAppUserDataDirectory "xmonad"
 
--- | 'recompile force', recompile @~\/.xmonad\/xmonad.hs@ when any of the
--- following apply:
---
---      * force is 'True'
---
---      * the xmonad executable does not exist
---
---      * the xmonad executable is older than xmonad.hs or any file in
---        ~\/.xmonad\/lib
---
--- The -i flag is used to restrict recompilation to the xmonad.hs file only,
--- and any files in the ~\/.xmonad\/lib directory.
+-- | Return path to directory with the 'xmonad-user' binary
+getXMonadBinDir :: MonadIO m => m String
+getXMonadBinDir = do
+  base <- io $ getAppUserDataDirectory "local"
+  return $ base </> "bin"
+
+-- | 'recompile', recompile @~\/.xmonad\/@ stack project.
 --
 -- Compilation errors (if any) are logged to ~\/.xmonad\/xmonad.errors.  If
--- GHC indicates failure with a non-zero exit code, an xmessage displaying
+-- stack indicates failure with a non-zero exit code, an xmessage displaying
 -- that file is spawned.
 --
 -- 'False' is returned if there are compilation errors.
 --
-recompile :: MonadIO m => Bool -> m Bool
-recompile force = io $ do
+recompile :: MonadIO m => m Bool
+recompile = io $ do
     dir <- getXMonadDir
-    let binn = "xmonad-"++arch++"-"++os
-        bin  = dir </> binn
-        base = dir </> "xmonad"
+    let base = dir </> "xmonad"
         err  = base ++ ".errors"
-        src  = base ++ ".hs"
-        lib  = dir </> "lib"
-    libTs <- mapM getModTime . Prelude.filter isSource =<< allFiles lib
-    srcT <- getModTime src
-    binT <- getModTime bin
-    if force || any (binT <) (srcT : libTs)
-      then do
-        -- temporarily disable SIGCHLD ignoring:
-        uninstallSignalHandlers
-        status <- bracket (openFile err WriteMode) hClose $ \h ->
-            waitForProcess =<< runProcess "ghc" ["--make", "xmonad.hs", "-i", "-ilib", "-fforce-recomp", "-main-is", "main", "-v0", "-o",binn] (Just dir)
-                                    Nothing Nothing Nothing (Just h)
+    -- temporarily disable SIGCHLD ignoring:
+    uninstallSignalHandlers
+    status <- bracket (openFile err WriteMode) hClose $ \h ->
+        -- run 'stack install' to complie and copy
+        -- the binary 'xmonad-user' to ~\/.local\/bin
+        waitForProcess =<< runProcess "stack" ["install"] (Just dir)
+                                Nothing Nothing Nothing (Just h)
 
-        -- re-enable SIGCHLD:
-        installSignalHandlers
+    -- re-enable SIGCHLD:
+    installSignalHandlers
 
-        -- now, if it fails, run xmessage to let the user know:
-        when (status /= ExitSuccess) $ do
-            ghcErr <- readFile err
-            let msg = unlines $
-                    ["Error detected while loading xmonad configuration file: " ++ src]
-                    ++ lines (if null ghcErr then show status else ghcErr)
-                    ++ ["","Please check the file for errors."]
-            -- nb, the ordering of printing, then forking, is crucial due to
-            -- lazy evaluation
-            hPutStrLn stderr msg
-            forkProcess $ executeFile "xmessage" True ["-default", "okay", msg] Nothing
-            return ()
-        return (status == ExitSuccess)
-      else return True
- where getModTime f = E.catch (Just <$> getModificationTime f) (\(SomeException _) -> return Nothing)
-       isSource = flip elem [".hs",".lhs",".hsc"] . takeExtension
-       allFiles t = do
-            let prep = map (t</>) . Prelude.filter (`notElem` [".",".."])
-            cs <- prep <$> E.catch (getDirectoryContents t) (\(SomeException _) -> return [])
-            ds <- filterM doesDirectoryExist cs
-            concat . ((cs \\ ds):) <$> mapM allFiles ds
+    -- now, if it fails, run xmessage to let the user know:
+    when (status /= ExitSuccess) $ do
+        ghcErr <- readFile err
+        let msg = unlines $
+                ["Error detected while loading xmonad-user stack project in direcory: " ++ dir]
+                ++ lines (if null ghcErr then show status else ghcErr)
+                ++ ["","Please check the project for errors."]
+        -- nb, the ordering of printing, then forking, is crucial due to
+        -- lazy evaluation
+        hPutStrLn stderr msg
+        forkProcess $ executeFile "xmessage" True ["-default", "okay", msg] Nothing
+        return ()
+    return (status == ExitSuccess)
 
 -- | Conditionally run an action, using a @Maybe a@ to decide.
 whenJust :: Monad m => Maybe a -> (a -> m ()) -> m ()

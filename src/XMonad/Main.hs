@@ -72,7 +72,7 @@ xmonad conf = do
     case args of
         ("--resume": ws : xs : args') -> launch (Just ws) (Just xs) args'
         ["--help"]            -> usage
-        ["--recompile"]       -> recompile True >>= flip unless exitFailure
+        ["--recompile"]       -> recompile >>= flip unless exitFailure
         ["--restart"]         -> sendRestart
         ["--version"]         -> putStrLn $ unwords shortVersion
         ["--verbose-version"] -> putStrLn . unwords $ shortVersion ++ longVersion
@@ -94,36 +94,34 @@ usage = do
         "Options:" :
         "  --help                       Print this message" :
         "  --version                    Print the version number" :
-        "  --recompile                  Recompile your ~/.xmonad/xmonad.hs" :
+        "  --recompile                  Recompile your ~/.xmonad/ stack project" :
         "  --replace                    Replace the running window manager with xmonad" :
         "  --restart                    Request a running xmonad process to restart" :
         []
 
--- | Build "~\/.xmonad\/xmonad.hs" with ghc, then execute it.  If there are no
--- errors, this function does not return.  An exception is raised in any of
--- these cases:
+-- | Build "~\/.local\/bin\/xmonad-user" with stack, then execute it.
+-- If there are no errors, this function does not return.  An exception is
+-- raised in any of these cases:
 --
---   * ghc missing
+--   * stack missing
 --
---   * both "~\/.xmonad\/xmonad.hs" and "~\/.xmonad\/xmonad-$arch-$os" missing
+--   * both "~\/.xmonad\/" stack project  and "~\/.local\/bin\/xmonad-user" missing
 --
---   * xmonad.hs fails to compile
+--   * xmonad-user fails to compile
 --
---      ** wrong ghc in path (fails to compile)
+--      ** wrong stack in path (fails to compile)
 --
 --      ** type error, syntax error, ..
 --
---   * Missing XMonad\/XMonadContrib modules due to ghc upgrade
---
 buildLaunch ::  IO ()
 buildLaunch = do
-    recompile False
-    dir  <- getXMonadDir
+    recompile
     args <- getArgs
     whoami <- getProgName
-    let compiledConfig = "xmonad-"++arch++"-"++os
+    dir <- getXMonadBinDir
+    let compiledConfig = "xmonad-user"
     unless (whoami == compiledConfig) $
-      executeFile (dir </> compiledConfig) False args Nothing
+        executeFile (dir </> compiledConfig) False args Nothing
 
 sendRestart :: IO ()
 sendRestart = do
